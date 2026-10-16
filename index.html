@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2443e8">
+<meta name="description" content="NeuroPulse: đo run tay 3–6 Hz bằng cảm biến điện thoại. Bản demo cho cuộc thi.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 34 34%27%3E%3Crect width=%2734%27 height=%2734%27 rx=%2710%27 fill=%27%232443e8%27/%3E%3Cpath d=%27M5 18h6l2.5-7 4 13 3-9 2 3h6.5%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272.4%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E">
+<title>NeuroPulse</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one-column instrument panel (dial → live trace → spectrum → action), phone-first, 560px max on desktop */
+:root {
+  --bg: #edf1f0;
+  --surface: #ffffff;
+  --surface-2: #f5f8f7;
+  --ink: #0d1b1e;
+  --muted: #586a6d;
+  --line: #d3dcda;
+  --accent: #2443e8;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3e8ff;
+  --ok: #138a4a;
+  --ok-soft: #dcf3e5;
+  --warn: #b77a00;
+  --warn-soft: #fbefcf;
+  --bad: #d23a3f;
+  --bad-soft: #fbe0e0;
+  --band: rgba(36, 67, 232, .10);
+  --shadow: 0 1px 2px rgba(13, 27, 30, .06), 0 8px 24px -12px rgba(13, 27, 30, .18);
+  --f-display: "Bricolage Grotesque", "Be Vietnam Pro", system-ui, sans-serif;
+  --f-body: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #091113; --surface: #10191c; --surface-2: #142024; --ink: #e5eeec; --muted: #8fa2a2; --line: #23332f;
+    --accent: #7088ff; --accent-ink: #0a1030; --accent-soft: #1b2450;
+    --ok: #3ccf7f; --ok-soft: #0f2c1d; --warn: #f2bd3a; --warn-soft: #2e240b; --bad: #ff6b6f; --bad-soft: #351416;
+    --band: rgba(112, 136, 255, .14); --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #091113; --surface: #10191c; --surface-2: #142024; --ink: #e5eeec; --muted: #8fa2a2; --line: #23332f;
+  --accent: #7088ff; --accent-ink: #0a1030; --accent-soft: #1b2450;
+  --ok: #3ccf7f; --ok-soft: #0f2c1d; --warn: #f2bd3a; --warn-soft: #2e240b; --bad: #ff6b6f; --bad-soft: #351416;
+  --band: rgba(112, 136, 255, .14); --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 15px/1.55 var(--f-body);
+  -webkit-font-smoothing: antialiased;
+}
+.app {
+  max-width: 560px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 40px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+/* top bar */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 6px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand svg { flex: none; }
+.brand b { font: 800 21px/1 var(--f-display); letter-spacing: -.02em; }
+.brand small { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 99px;
+  font-size: 12px; font-weight: 600; background: var(--surface); color: var(--muted); border: 1px solid var(--line); white-space: nowrap;
+}
+.pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.pill.live i { background: var(--bad); animation: blink 1s infinite; }
+.pill.sim { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.pill.sim i { background: var(--warn); }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* panels */
+.panel { background: var(--surface); border-radius: var(--r); box-shadow: var(--shadow); }
+
+/* dial */
+.dial { padding: 18px 18px 16px; display: grid; gap: 6px; }
+.dial-wrap { position: relative; width: min(100%, 300px); margin: 0 auto; aspect-ratio: 1 / .78; max-width: 100%; }
+.dial-wrap svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.dial-center { position: absolute; inset: 31% 0 auto; display: grid; justify-items: center; text-align: center; }
+.score { font: 800 clamp(48px, 16vw, 72px)/.9 var(--f-display); letter-spacing: -.04em; font-variant-numeric: tabular-nums; transition: color .3s; }
+.score-sub { font-size: 12px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; font-weight: 600; margin-top: 6px; }
+.verdict {
+  justify-self: center; margin-top: -4px; padding: 6px 14px; border-radius: 99px; font-weight: 600; font-size: 14px;
+  background: var(--surface-2); color: var(--muted); transition: background .3s, color .3s;
+}
+.z-ok .score { color: var(--ok); } .z-ok .verdict { background: var(--ok-soft); color: var(--ok); }
+.z-warn .score { color: var(--warn); } .z-warn .verdict { background: var(--warn-soft); color: var(--warn); }
+.z-bad .score { color: var(--bad); } .z-bad .verdict { background: var(--bad-soft); color: var(--bad); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); margin-top: 10px; padding-top: 12px; }
+.stat { display: grid; gap: 2px; text-align: center; min-width: 0; }
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat span { font-size: 11.5px; color: var(--muted); }
+.stat strong { font: 500 16px/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+
+/* scope */
+.scope { padding: 14px 14px 12px; display: grid; gap: 10px; }
+.scope-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.scope-head h2 { margin: 0; font: 600 14px/1.2 var(--f-body); }
+.scope-head span { font-size: 12px; color: var(--muted); }
+canvas { display: block; width: 100%; max-width: 100%; border-radius: 10px; background: var(--surface-2); }
+#wave { height: 120px; }
+#spec { height: 92px; }
+
+/* action */
+.action { display: grid; gap: 10px; }
+.btn {
+  appearance: none; border: 0; cursor: pointer; font: 600 16px/1 var(--f-body); border-radius: 14px;
+  padding: 17px 20px; display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+  transition: transform .08s, background .2s, opacity .2s; -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(.985); }
+.btn:focus-visible, .seg button:focus-visible, .link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 20px -10px var(--accent); }
+.btn-stop { background: var(--ink); color: var(--bg); }
+.btn-ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.btn[disabled] { opacity: .5; cursor: default; }
+.progress { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .25s linear; }
+.progress-row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+.hint { margin: 0; text-align: center; font-size: 13.5px; color: var(--muted); }
+.notice { padding: 12px 14px; border-radius: 12px; background: var(--warn-soft); color: var(--ink); font-size: 14px; display: grid; gap: 8px; }
+.notice b { color: var(--warn); }
+.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* sim switch */
+.simbar { display: grid; gap: 8px; padding: 12px 14px; }
+.simbar p { margin: 0; font-size: 13px; color: var(--muted); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--surface-2); border-radius: 12px; padding: 4px; }
+.seg button { appearance: none; border: 0; background: transparent; color: var(--muted); font: 600 13.5px/1.2 var(--f-body); padding: 10px 6px; border-radius: 9px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+
+/* how-to + legend */
+.section-title { margin: 8px 2px 0; font: 700 18px/1.2 var(--f-display); letter-spacing: -.01em; text-wrap: balance; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: s; }
+.steps li { display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start; counter-increment: s; }
+.steps li::before {
+  content: counter(s); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); font: 600 14px/1 var(--f-mono);
+}
+.steps b { display: block; font-weight: 600; }
+.steps span { color: var(--muted); font-size: 14px; }
+.howto { padding: 16px; }
+.legend { display: grid; gap: 0; padding: 6px 16px; }
+.legend-row { display: grid; grid-template-columns: 14px 64px 1fr; gap: 12px; align-items: center; padding: 11px 0; }
+.legend-row + .legend-row { border-top: 1px solid var(--line); }
+.legend-row i { width: 14px; height: 14px; border-radius: 4px; }
+.legend-row .num { font-size: 13px; color: var(--muted); }
+.legend-row b { font-weight: 600; }
+.legend-row small { display: block; color: var(--muted); font-size: 13px; }
+
+/* result sheet */
+.result { padding: 18px; display: grid; gap: 14px; border: 2px solid var(--line); }
+.result.z-ok { border-color: var(--ok); } .result.z-warn { border-color: var(--warn); } .result.z-bad { border-color: var(--bad); }
+.result-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.result-head h3 { margin: 0; font: 700 18px/1.2 var(--f-display); }
+.result-head time { font-size: 12.5px; color: var(--muted); }
+.result-big { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.result-big strong { font: 800 56px/1 var(--f-display); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.result-big span { font-size: 15px; font-weight: 600; }
+.z-ok .result-big strong, .z-ok .result-big span { color: var(--ok); }
+.z-warn .result-big strong, .z-warn .result-big span { color: var(--warn); }
+.z-bad .result-big strong, .z-bad .result-big span { color: var(--bad); }
+.result p { margin: 0; color: var(--muted); font-size: 14px; }
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
+.kv div { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.kv dt { font-size: 12px; color: var(--muted); }
+.kv dd { margin: 2px 0 0; font: 500 15px/1.3 var(--f-mono); font-variant-numeric: tabular-nums; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row2 .btn { padding: 14px 12px; font-size: 15px; }
+.toast { font-size: 13px; color: var(--muted); min-height: 1em; margin: 0; }
+
+/* history */
+.history { padding: 6px 16px; }
+.history ol { list-style: none; margin: 0; padding: 0; }
+.history li { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 11px 0; font-size: 14px; }
+.history li + li { border-top: 1px solid var(--line); }
+.history time { color: var(--muted); font-size: 13px; }
+.chip { font: 600 13px/1 var(--f-mono); padding: 5px 9px; border-radius: 8px; min-width: 42px; text-align: center; }
+.chip.z-ok { background: var(--ok-soft); color: var(--ok); } .chip.z-warn { background: var(--warn-soft); color: var(--warn); } .chip.z-bad { background: var(--bad-soft); color: var(--bad); }
+.history .src { font-size: 12px; color: var(--muted); }
+.empty { color: var(--muted); font-size: 14px; padding: 12px 0; margin: 0; }
+
+.disclaimer { font-size: 12.5px; color: var(--muted); padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--line); line-height: 1.5; }
+.disclaimer b { color: var(--ink); }
+footer.foot { text-align: center; font-size: 12px; color: var(--muted); }
+
+/* countdown overlay */
+.count {
+  position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; text-align: center;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(16px, env(safe-area-inset-left, 0px));
+}
+.count strong { display: block; font: 800 120px/1 var(--f-display); color: var(--accent); }
+.count p { margin: 10px 0 0; font-size: 16px; font-weight: 500; max-width: 28ch; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media (min-width: 600px) { .app { padding-block: 24px 48px; } }
+</style>
+</head>
+<body>
+
+<div class="app" id="app" data-state="idle">
+  <header class="top">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="var(--accent)"/><path d="M5 18h6l2.5-7 4 13 3-9 2 3h6.5" fill="none" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><b>NeuroPulse</b><small>Đo run tay bằng điện thoại</small></div>
+    </div>
+    <span class="pill" id="srcPill"><i></i><span id="srcText">Sẵn sàng</span></span>
+  </header>
+
+  <section class="panel dial" id="dial" aria-live="polite">
+    <div class="dial-wrap">
+      <svg viewBox="0 0 300 234" aria-hidden="true">
+        <path id="arcTrack" fill="none" stroke="var(--line)" stroke-width="16" stroke-linecap="round"/>
+        <path id="arcOk" fill="none" stroke="var(--ok)" stroke-width="4" opacity=".55"/>
+        <path id="arcWarn" fill="none" stroke="var(--warn)" stroke-width="4" opacity=".55"/>
+        <path id="arcBad" fill="none" stroke="var(--bad)" stroke-width="4" opacity=".55"/>
+        <path id="arcVal" fill="none" stroke="var(--muted)" stroke-width="16" stroke-linecap="round"/>
+        <g id="ticks"></g>
+      </svg>
+      <div class="dial-center">
+        <div class="score" id="score">–</div>
+        <div class="score-sub">Chỉ số run / 100</div>
+      </div>
+    </div>
+    <div class="verdict" id="verdict">Chưa đo</div>
+    <div class="stats">
+      <div class="stat"><span>Tần số chính</span><strong id="stFreq">– Hz</strong></div>
+      <div class="stat"><span>Rung 3–6 Hz</span><strong id="stRatio">– %</strong></div>
+      <div class="stat"><span>Cường độ</span><strong id="stAmp">–</strong></div>
+    </div>
+  </section>
+
+  <section class="action">
+    <button class="btn btn-primary" id="startBtn" type="button">
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 6.5v7l5.5-3.5z" fill="currentColor"/></svg>
+      <span id="startLabel">Bắt đầu đo 30 giây</span>
+    </button>
+    <div id="progressBox" hidden>
+      <div class="progress"><div id="progressBar"></div></div>
+      <div class="progress-row"><span id="progressText">0 / 30 giây</span><span id="rateText" class="num"></span></div>
+    </div>
+    <p class="hint" id="hint">Cầm điện thoại trong lòng bàn tay, duỗi thẳng tay ra trước rồi bấm nút. Giữ yên trong 30 giây.</p>
+    <div class="notice" id="notice" hidden></div>
+  </section>
+
+  <section class="panel scope">
+    <div class="scope-head"><h2>Sóng rung trực tiếp</h2><span id="waveScale" class="num">±0,2 m/s²</span></div>
+    <canvas id="wave" aria-label="Biểu đồ sóng rung trong 5 giây gần nhất"></canvas>
+    <div class="scope-head"><h2>Phổ tần số</h2><span>vùng tô: dải run 3–6 Hz</span></div>
+    <canvas id="spec" aria-label="Phổ tần số 0 đến 15 Hz"></canvas>
+  </section>
+
+
+  <section class="panel simbar" id="simbar" hidden>
+    <span class="pill sim" style="justify-self:start"><i></i>MÔ PHỎNG</span>
+    <p>Dữ liệu giả lập để xem thử trên máy tính. Không phải số đo thật của bạn.</p>
+    <div class="seg" role="group" aria-label="Chọn kiểu tay mô phỏng">
+      <button type="button" id="simStill" data-sim="still" aria-pressed="true">Tay để yên</button>
+      <button type="button" id="simMove" data-sim="move" aria-pressed="false">Cử động thường</button>
+      <button type="button" id="simTremor" data-sim="tremor" aria-pressed="false">Run 3–6 Hz</button>
+    </div>
+    <button class="link" id="simExit" type="button" style="justify-self:start">Thoát mô phỏng</button>
+  </section>
+
+  <section class="panel result" id="result" hidden>
+    <div class="result-head">
+      <h3>Kết quả lần đo</h3>
+      <time id="resTime"></time>
+    </div>
+    <div class="result-big"><strong id="resScore">0</strong><span id="resVerdict"></span></div>
+    <p id="resText"></p>
+    <dl class="kv">
+      <div><dt>Tần số rung chính</dt><dd id="resFreq">–</dd></div>
+      <div><dt>Tỉ lệ rung 3–6 Hz</dt><dd id="resRatio">–</dd></div>
+      <div><dt>Cường độ dải run</dt><dd id="resAmp">–</dd></div>
+      <div><dt>Số mẫu · tốc độ</dt><dd id="resSamples">–</dd></div>
+    </dl>
+    <div class="row2">
+      <button class="btn btn-ghost" id="dlBtn" type="button">Tải dữ liệu (CSV)</button>
+      <button class="btn btn-primary" id="againBtn" type="button">Đo lại</button>
+    </div>
+    <p class="toast" id="toast" role="status"></p>
+  </section>
+
+  <h2 class="section-title">Cách đo trong 1 phút</h2>
+  <section class="panel howto">
+    <ol class="steps">
+      <li><div><b>Cầm điện thoại trong lòng bàn tay</b><span>Màn hình hướng lên, không tì tay lên bàn hay người.</span></div></li>
+      <li><div><b>Duỗi thẳng tay ra phía trước</b><span>Giữ ngang vai, thả lỏng, thở đều.</span></div></li>
+      <li><div><b>Bấm “Bắt đầu đo” và giữ yên 30 giây</b><span>Xong sẽ có điểm, màu kết quả và file dữ liệu để tải.</span></div></li>
+    </ol>
+  </section>
+
+  <h2 class="section-title">Màu kết quả nghĩa là gì</h2>
+  <section class="panel legend">
+    <div class="legend-row"><i style="background:var(--ok)"></i><span class="num">0 – 29</span><div><b>Xanh · Ổn định</b><small>Gần như không có rung nhịp 3–6 lần/giây.</small></div></div>
+    <div class="legend-row"><i style="background:var(--warn)"></i><span class="num">30 – 59</span><div><b>Vàng · Cần theo dõi</b><small>Có rung nhịp đều nhưng chưa rõ. Nên đo lại vài lần.</small></div></div>
+    <div class="legend-row"><i style="background:var(--bad)"></i><span class="num">60 – 100</span><div><b>Đỏ · Run rõ</b><small>Rung 3–6 lần/giây chiếm phần lớn chuyển động của tay.</small></div></div>
+  </section>
+
+  <h2 class="section-title">Các lần đo gần đây</h2>
+  <section class="panel history">
+    <ol id="histList"></ol>
+    <p class="empty" id="histEmpty">Chưa có lần đo nào trên máy này.</p>
+  </section>
+
+  <p class="disclaimer"><b>Bản demo cho cuộc thi, không dùng để chẩn đoán.</b> NeuroPulse đo dao động của bàn tay qua cảm biến gia tốc của điện thoại và tính tỉ lệ rung trong dải 3–6 Hz, là dải run thường gặp ở bệnh Parkinson. Con số này chưa được kiểm chứng lâm sàng. Nếu lo lắng về sức khỏe, hãy gặp bác sĩ.</p>
+  <footer class="foot">NeuroPulse · dữ liệu chỉ nằm trên máy của bạn, không gửi đi đâu</footer>
+</div>
+
+<div class="count" id="count" hidden><div><strong id="countNum">3</strong><p>Duỗi tay, giữ yên điện thoại…</p></div></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ================= Cấu hình thuật toán ================= */
+const CFG = {
+  fs: 50,            // tần số lấy mẫu đều sau khi nội suy (Hz)
+  win: 4,            // cửa sổ phân tích (giây)
+  hop: 2,            // cập nhật mỗi 2 giây
+  dur: 30,           // thời gian đo (giây)
+  countdown: 3,
+  hpFc: 1.5,         // lọc thông cao: bỏ cử động chậm < 1.5 Hz
+  band: [3, 6],      // dải run
+  edgeLo: 0.5, edgeHi: 1.5,       // vùng chuyển tiếp mềm ở hai mép dải
+  total: [1.5, 15],  // dải tham chiếu
+  ratioLo: 0.40, ratioHi: 0.75,  // tỉ lệ năng lượng 3–6 Hz → điểm
+  ampLo: 0.04, ampHi: 0.25       // cường độ dải run (m/s² RMS) → hệ số
+};
+
+/* ================= Xử lý tín hiệu (thuần, kiểm thử được) ================= */
+function makeHP(fc, fs) {
+  const w = 2 * Math.PI * fc / fs, c = Math.cos(w), s = Math.sin(w), a = s / (2 * Math.SQRT1_2), a0 = 1 + a;
+  return { b0: (1 + c) / 2 / a0, b1: -(1 + c) / a0, b2: (1 + c) / 2 / a0, a1: -2 * c / a0, a2: (1 - a) / a0, x1: 0, x2: 0, y1: 0, y2: 0, init: false };
+}
+function hpStep(f, x) {
+  if (!f.init) { f.x1 = f.x2 = x; f.y1 = f.y2 = 0; f.init = true; }
+  const y = f.b0 * x + f.b1 * f.x1 + f.b2 * f.x2 - f.a1 * f.y1 - f.a2 * f.y2;
+  f.x2 = f.x1; f.x1 = x; f.y2 = f.y1; f.y1 = y;
+  return y;
+}
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+const clip01 = v => Math.max(0, Math.min(1, v));
+/* trọng số dải run: đủ 100% trong 3–6 Hz, giảm dần về 0 ở 2,5 Hz và 7,5 Hz
+   để run sát mép 6 Hz (hay dao động quanh 6 Hz) không bị rơi mất điểm đột ngột */
+function bandWeight(f) {
+  const [lo, hi] = CFG.band;
+  if (f >= lo && f <= hi) return 1;
+  if (f < lo) return clip01((f - (lo - CFG.edgeLo)) / CFG.edgeLo);
+  return clip01(((hi + CFG.edgeHi) - f) / CFG.edgeHi);
+}
+function analyze(axes, fs = CFG.fs) {
+  const n = axes[0].length, N = 256, half = N / 2, P = new Float64Array(half + 1);
+  let varSum = 0;
+  for (const a of axes) {
+    let m = 0; for (let i = 0; i < n; i++) m += a[i]; m /= n;
+    const re = new Float64Array(N), im = new Float64Array(N);
+    for (let i = 0; i < n; i++) {
+      const d = a[i] - m; varSum += d * d / n;
+      re[i] = d * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)));
+    }
+    fft(re, im);
+    for (let k = 0; k <= half; k++) P[k] += re[k] * re[k] + im[k] * im[k];
+  }
+  const df = fs / N;
+  let pb = 0, pt = 0, pall = 0, peakK = 0, peakV = -1;
+  for (let k = 1; k <= half; k++) {
+    const f = k * df;
+    pall += P[k];
+    if (f >= CFG.total[0] && f <= CFG.total[1]) { pt += P[k]; if (P[k] > peakV) { peakV = P[k]; peakK = k; } }
+    pb += bandWeight(f) * P[k];
+  }
+  const ratio = pt > 0 ? pb / pt : 0;
+  const rmsBand = Math.sqrt(varSum * (pall > 0 ? pb / pall : 0));
+  const sR = clip01((ratio - CFG.ratioLo) / (CFG.ratioHi - CFG.ratioLo));
+  const sA = rmsBand <= 0 ? 0 : clip01(Math.log(rmsBand / CFG.ampLo) / Math.log(CFG.ampHi / CFG.ampLo));
+  return { score: Math.round(100 * sR * sA), ratio, rmsBand, rmsTotal: Math.sqrt(varSum), peakHz: peakK * df, spectrum: P, df };
+}
+const median = arr => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), h = s.length >> 1; return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; };
+window.NeuroPulseDSP = { CFG, analyze, makeHP, hpStep, median, bandWeight };
+
+/* ================= Trạng thái ================= */
+const $ = id => document.getElementById(id);
+const BUF = CFG.fs * 10;
+const st = {
+  phase: 'idle',        // idle | arming | countdown | recording | done
+  source: null,         // 'sensor' | 'sim'
+  hp: null, ring: null, ringN: 0, uniCount: 0,
+  last: null, nextT: null, t0: null,
+  rawCount: 0, rawT0: null, rawT1: null,
+  rec: null, recStart: null, windows: [],
+  sinceHop: 0, live: null, liveScore: null,
+  dir: [0, 0, 1],
+  simKind: 'still', simTimer: null,
+  sensorSeen: false, watchdog: null, wakeLock: null,
+  lastResult: null
+};
+function resetStream() {
+  st.hp = [makeHP(CFG.hpFc, CFG.fs), makeHP(CFG.hpFc, CFG.fs), makeHP(CFG.hpFc, CFG.fs)];
+  st.ring = [new Float64Array(BUF), new Float64Array(BUF), new Float64Array(BUF)];
+  st.ringN = 0; st.uniCount = 0; st.last = null; st.nextT = null; st.sinceHop = 0;
+  st.rawCount = 0; st.rawT0 = null; st.rawT1 = null;
+}
+
+/* Nhận một mẫu thô (thời gian giây, gia tốc m/s²) → nội suy về 50 Hz đều */
+function ingest(t, x, y, z) {
+  if (![x, y, z].every(Number.isFinite)) return;
+  st.rawCount++; if (st.rawT0 === null) st.rawT0 = t; st.rawT1 = t;
+  const cur = { t, v: [x, y, z] };
+  if (!st.last || t - st.last.t > 1 || t <= st.last.t) { st.last = cur; st.nextT = t; if (st.uniCount === 0) pushUniform(t, cur.v); st.nextT = t + 1 / CFG.fs; return; }
+  const a = st.last;
+  while (st.nextT <= t) {
+    const u = (st.nextT - a.t) / (t - a.t);
+    pushUniform(st.nextT, [0, 1, 2].map(i => a.v[i] + u * (cur.v[i] - a.v[i])));
+    st.nextT += 1 / CFG.fs;
+  }
+  st.last = cur;
+}
+function pushUniform(t, v) {
+  const h = [hpStep(st.hp[0], v[0]), hpStep(st.hp[1], v[1]), hpStep(st.hp[2], v[2])];
+  const i = st.ringN % BUF;
+  for (let k = 0; k < 3; k++) st.ring[k][i] = h[k];
+  st.ringN++; st.uniCount++;
+  if (st.phase === 'recording') {
+    const rt = t - st.recStart;
+    if (rt >= 0) st.rec.push([rt, v[0], v[1], v[2], h[0], h[1], h[2]]);
+  }
+  if (++st.sinceHop >= CFG.hop * CFG.fs && st.ringN >= CFG.win * CFG.fs) { st.sinceHop = 0; onHop(t); }
+}
+function lastN(n) {
+  const out = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+  const start = st.ringN - n;
+  for (let j = 0; j < n; j++) { const i = (start + j) % BUF; for (let k = 0; k < 3; k++) out[k][j] = st.ring[k][(i + BUF) % BUF]; }
+  return out;
+}
+function onHop(t) {
+  const axes = lastN(CFG.win * CFG.fs);
+  const r = analyze(axes);
+  st.live = r;
+  st.liveScore = st.liveScore === null ? r.score : Math.round(0.5 * st.liveScore + 0.5 * r.score);
+  updateDir(axes);
+  if (st.phase === 'recording' && t - st.recStart >= CFG.win - 1e-6) st.windows.push(r);
+  renderLive();
+}
+/* hướng rung chính (PCA đơn giản) để vẽ một đường sóng có dấu */
+function updateDir(axes) {
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], n = axes[0].length;
+  for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) C[a][b] += axes[a][i] * axes[b][i];
+  let v = st.dir.slice();
+  for (let it = 0; it < 12; it++) {
+    const w = [0, 1, 2].map(a => C[a][0] * v[0] + C[a][1] * v[1] + C[a][2] * v[2]);
+    const nn = Math.hypot(...w) || 1; v = w.map(x => x / nn);
+  }
+  if (v[0] * st.dir[0] + v[1] * st.dir[1] + v[2] * st.dir[2] < 0) v = v.map(x => -x);
+  if (v.every(Number.isFinite)) st.dir = v;
+}
+
+/* ================= Nguồn dữ liệu: cảm biến thật ================= */
+function onMotion(e) {
+  const g = e.accelerationIncludingGravity && e.accelerationIncludingGravity.x !== null ? e.accelerationIncludingGravity : e.acceleration;
+  if (!g || g.x === null || g.x === undefined) return;
+  st.sensorSeen = true;
+  ingest(performance.now() / 1000, g.x, g.y, g.z);
+}
+async function startSensor() {
+  try {
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      const p = await DeviceMotionEvent.requestPermission();
+      if (p !== 'granted') return 'denied';
+    }
+  } catch (err) { return 'blocked'; }
+  if (typeof DeviceMotionEvent === 'undefined') return 'none';
+  st.sensorSeen = false;
+  window.addEventListener('devicemotion', onMotion);
+  return 'ok';
+}
+function stopSensor() { window.removeEventListener('devicemotion', onMotion); }
+
+/* ================= Nguồn dữ liệu: mô phỏng (chỉ để xem thử) ================= */
+function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+const sim = { t: 0, ph: 0, mv: null };
+function simSample(t) {
+  const dt = t - sim.t; sim.t = t;
+  let x = 0.012 * gauss(), y = 0.012 * gauss(), z = 9.81 + 0.012 * gauss();
+  x += 0.015 * Math.sin(2 * Math.PI * 9.5 * t);           // run sinh lý rất nhỏ
+  if (st.simKind === 'tremor') {
+    const f = 4.8 + 0.25 * Math.sin(0.4 * t); sim.ph += 2 * Math.PI * f * dt;
+    const A = 1.1 * (1 + 0.25 * Math.sin(0.7 * t));
+    x += A * Math.sin(sim.ph); y += 0.45 * A * Math.sin(sim.ph + 0.6);
+  } else if (st.simKind === 'move') {
+    if (!sim.mv || t > sim.mv.end) {
+      const d = 0.5 + Math.random() * 1.2, k = Math.random();
+      sim.mv = { start: t, end: t + d, d, amp: (Math.random() < .5 ? -1 : 1) * (0.1 + Math.random() * 0.25), axis: Math.floor(Math.random() * 3), wave: k < 0.3 ? 1.2 + Math.random() : 0, tilt: (Math.random() - .5) * 0.6 };
+    }
+    const m = sim.mv, s = (t - m.start) / m.d;
+    let acc;
+    if (m.wave) acc = -m.amp * Math.pow(2 * Math.PI * m.wave, 2) * Math.sin(2 * Math.PI * m.wave * (t - m.start)) * Math.sin(Math.PI * s);
+    else acc = m.amp / (m.d * m.d) * (60 * s - 180 * s * s + 120 * s * s * s);
+    const tilt = m.tilt * (10 * s ** 3 - 15 * s ** 4 + 6 * s ** 5);
+    const v = [x, y, z]; v[m.axis] += acc;
+    v[0] += 9.81 * Math.sin(tilt); v[2] = v[2] - 9.81 * (1 - Math.cos(tilt));
+    [x, y, z] = v;
+  }
+  return [x, y, z];
+}
+function startSim() {
+  stopSim(); sim.t = performance.now() / 1000;
+  st.simTimer = setInterval(() => { const t = performance.now() / 1000; const [x, y, z] = simSample(t); ingest(t, x, y, z); }, 1000 / 60);
+}
+function stopSim() { if (st.simTimer) clearInterval(st.simTimer); st.simTimer = null; }
+
+/* ================= Luồng đo ================= */
+async function start() {
+  if (st.phase === 'countdown' || st.phase === 'recording' || st.phase === 'arming') { stop(true); return; }
+  hide($('notice')); hide($('result'));
+  resetStream(); st.live = null; st.liveScore = null;
+  setPhase('arming');
+  if (st.source !== 'sim') {
+    const res = await startSensor();
+    if (res !== 'ok') { sensorFail(res); return; }
+    st.source = 'sensor';
+    clearTimeout(st.watchdog);
+    st.watchdog = setTimeout(() => { if (!st.sensorSeen && st.phase !== 'idle') sensorFail('none'); }, 1800);
+  } else startSim();
+  requestWake();
+  setPhase('countdown');
+  let c = CFG.countdown; $('countNum').textContent = c; show($('count'));
+  const tick = () => {
+    if (st.phase !== 'countdown') return;
+    c--;
+    if (c > 0) { $('countNum').textContent = c; st.cdTimer = setTimeout(tick, 1000); }
+    else { hide($('count')); beginRecording(); }
+  };
+  st.cdTimer = setTimeout(tick, 1000);
+}
+function beginRecording() {
+  st.rec = []; st.windows = []; st.recStart = performance.now() / 1000; st.sinceHop = 0;
+  st.recRaw0 = st.rawCount;
+  setPhase('recording');
+  st.recTimer = setInterval(() => {
+    const el = performance.now() / 1000 - st.recStart;
+    $('progressBar').style.width = Math.min(100, el / CFG.dur * 100) + '%';
+    $('progressText').textContent = Math.min(CFG.dur, Math.floor(el)) + ' / ' + CFG.dur + ' giây';
+    if (st.source === 'sensor' && st.rawT1 !== null && performance.now() / 1000 - st.rawT1 > 2) { sensorFail('lost'); return; }
+    if (el >= CFG.dur) finish();
+  }, 200);
+}
+function finish() {
+  clearInterval(st.recTimer);
+  const ws = st.windows;
+  if (!ws.length) { sensorFail('short'); return; }
+  const score = Math.round(median(ws.map(w => w.score)));
+  const res = {
+    at: new Date(), source: st.source, score,
+    ratio: median(ws.map(w => w.ratio)), rmsBand: median(ws.map(w => w.rmsBand)), peakHz: median(ws.map(w => w.peakHz)),
+    windows: ws.map(w => w.score), samples: st.rec.length,
+    rawRate: st.rawT1 > st.rawT0 ? (st.rawCount - 1) / (st.rawT1 - st.rawT0) : 0,
+    rows: st.rec
+  };
+  st.lastResult = res;
+  stopSources(); releaseWake();
+  setPhase('done');
+  showResult(res);
+  saveHistory(res);
+}
+function stop(user) {
+  clearTimeout(st.cdTimer); clearInterval(st.recTimer); clearTimeout(st.watchdog);
+  hide($('count')); stopSources(); releaseWake();
+  setPhase('idle');
+  if (user) toastNotice('Đã dừng. Bấm “Bắt đầu đo” để đo lại từ đầu.', false);
+}
+function stopSources() { stopSensor(); stopSim(); }
+function sensorFail(kind) {
+  clearTimeout(st.cdTimer); clearInterval(st.recTimer); clearTimeout(st.watchdog);
+  hide($('count')); stopSources(); releaseWake(); setPhase('idle');
+  const msg = {
+    denied: '<b>Bạn chưa cho phép đọc cảm biến chuyển động.</b> Bấm “Bắt đầu đo” lần nữa và chọn “Cho phép”. Nếu không thấy hỏi, hãy đóng tab rồi mở lại link.',
+    blocked: '<b>Trình duyệt chặn cảm biến ở trang này.</b> Hãy mở link NeuroPulse trực tiếp bằng Safari hoặc Chrome trên điện thoại.',
+    none: '<b>Không nhận được tín hiệu cảm biến.</b> Máy tính thường không có cảm biến rung, và một số trang nhúng bị chặn. Hãy mở link trên điện thoại, hoặc xem thử bằng dữ liệu mô phỏng.',
+    lost: '<b>Mất tín hiệu cảm biến giữa chừng.</b> Đừng tắt màn hình hay chuyển ứng dụng trong lúc đo. Bấm “Bắt đầu đo” để đo lại.',
+    short: '<b>Chưa đủ dữ liệu để tính điểm.</b> Hãy đo lại và giữ màn hình sáng đủ 30 giây.'
+  }[kind] || 'Có lỗi khi đọc cảm biến.';
+  const canSim = kind === 'none' || kind === 'blocked';
+  $('notice').innerHTML = '<div>' + msg + '</div>' + (canSim ? '<button class="link" type="button" id="goSim">Xem thử bằng dữ liệu mô phỏng</button>' : '');
+  show($('notice'));
+  if (canSim) $('goSim').onclick = enterSim;
+}
+function toastNotice(text) { $('notice').innerHTML = '<div>' + text + '</div>'; show($('notice')); }
+function enterSim() { st.source = 'sim'; hide($('notice')); show($('simbar')); setPhase('idle'); }
+function exitSim() { if (st.phase !== 'idle' && st.phase !== 'done') stop(false); st.source = null; hide($('simbar')); setPhase('idle'); }
+
+async function requestWake() { try { if (navigator.wakeLock) st.wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { st.wakeLock = null; } }
+function releaseWake() { try { st.wakeLock && st.wakeLock.release(); } catch (e) {} st.wakeLock = null; }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && st.phase === 'recording') requestWake(); });
+
+/* ================= Giao diện ================= */
+const show = el => { el.hidden = false; }, hide = el => { el.hidden = true; };
+const fmt = (v, d = 1) => v.toLocaleString('vi-VN', { minimumFractionDigits: d, maximumFractionDigits: d });
+function zoneOf(s) { return s < 30 ? 'ok' : s < 60 ? 'warn' : 'bad'; }
+const ZONE_TEXT = { ok: 'Ổn định', warn: 'Cần theo dõi', bad: 'Run rõ' };
+
+function setPhase(p) {
+  st.phase = p; $('app').dataset.state = p;
+  const busy = p === 'arming' || p === 'countdown' || p === 'recording';
+  const b = $('startBtn');
+  b.className = 'btn ' + (busy ? 'btn-stop' : 'btn-primary');
+  $('startLabel').textContent = busy ? 'Dừng đo' : (p === 'done' ? 'Đo lần nữa' : (st.source === 'sim' ? 'Bắt đầu đo mô phỏng 30 giây' : 'Bắt đầu đo 30 giây'));
+  $('progressBox').hidden = p !== 'recording';
+  $('hint').hidden = busy || p === 'done';
+  if (p !== 'recording') $('progressBar').style.width = '0';
+  const pill = $('srcPill');
+  pill.className = 'pill' + (st.source === 'sim' ? ' sim' : '') + (p === 'recording' ? ' live' : '');
+  $('srcText').textContent = st.source === 'sim' ? 'MÔ PHỎNG' : p === 'recording' ? 'Đang đo' : p === 'countdown' ? 'Chuẩn bị' : 'Sẵn sàng';
+  if (p === 'idle') { setScore(null); }
+}
+function setScore(s) {
+  const dial = $('dial');
+  dial.classList.remove('z-ok', 'z-warn', 'z-bad');
+  if (s === null) {
+    $('score').textContent = '–'; $('verdict').textContent = st.phase === 'done' ? 'Đã đo xong' : 'Chưa đo';
+    $('arcVal').setAttribute('d', ''); ['stFreq', 'stRatio', 'stAmp'].forEach(id => $(id).textContent = '–');
+    return;
+  }
+  const z = zoneOf(s); dial.classList.add('z-' + z);
+  $('score').textContent = s; $('verdict').textContent = ZONE_TEXT[z];
+  $('arcVal').setAttribute('d', s > 0 ? arcPath(0, s) : '');
+  $('arcVal').setAttribute('stroke', 'var(--' + z + ')');
+}
+function renderLive() {
+  if (!st.live) return;
+  if (st.phase === 'recording' || st.phase === 'countdown') {
+    setScore(st.liveScore);
+    $('stFreq').textContent = fmt(st.live.peakHz) + ' Hz';
+    $('stRatio').textContent = Math.round(st.live.ratio * 100) + ' %';
+    $('stAmp').textContent = fmt(st.live.rmsBand, 2);
+    if (st.rawT1 > st.rawT0) $('rateText').textContent = 'cảm biến ' + Math.round((st.rawCount - 1) / (st.rawT1 - st.rawT0)) + ' Hz';
+  }
+}
+function showResult(r) {
+  const z = zoneOf(r.score);
+  setScore(r.score);
+  $('stFreq').textContent = fmt(r.peakHz) + ' Hz'; $('stRatio').textContent = Math.round(r.ratio * 100) + ' %'; $('stAmp').textContent = fmt(r.rmsBand, 2);
+  const box = $('result'); box.className = 'panel result z-' + z;
+  $('resScore').textContent = r.score; $('resVerdict').textContent = ZONE_TEXT[z] + (r.source === 'sim' ? ' · mô phỏng' : '');
+  $('resTime').textContent = r.at.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+  $('resText').textContent = {
+    ok: 'Chuyển động của tay chủ yếu là cử động chậm hoặc nhiễu nhỏ, gần như không có rung nhịp 3–6 lần/giây.',
+    warn: 'Có một phần rung nhịp đều 3–6 lần/giây. Hãy đo lại 2–3 lần, giữ tay thả lỏng để so sánh.',
+    bad: 'Rung nhịp đều 3–6 lần/giây chiếm phần lớn chuyển động của tay trong lần đo này.'
+  }[z];
+  $('resFreq').textContent = fmt(r.peakHz) + ' Hz';
+  $('resRatio').textContent = Math.round(r.ratio * 100) + ' %';
+  $('resAmp').textContent = fmt(r.rmsBand, 2) + ' m/s²';
+  $('resSamples').textContent = r.samples + ' · ' + Math.round(r.rawRate) + ' Hz';
+  $('toast').textContent = '';
+  show(box);
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/* lịch sử (chỉ lưu trên máy này) */
+const HKEY = 'neuropulse.history.v1';
+function loadHistory() { try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (e) { return []; } }
+function saveHistory(r) {
+  const h = loadHistory(); h.unshift({ at: r.at.toISOString(), score: r.score, hz: +r.peakHz.toFixed(1), src: r.source });
+  try { localStorage.setItem(HKEY, JSON.stringify(h.slice(0, 8))); } catch (e) {}
+  renderHistory(h.slice(0, 8));
+}
+function renderHistory(h = loadHistory()) {
+  const ol = $('histList'); ol.innerHTML = '';
+  $('histEmpty').hidden = h.length > 0;
+  for (const it of h) {
+    const li = document.createElement('li'), d = new Date(it.at), z = zoneOf(it.score);
+    const left = document.createElement('div');
+    const tm = document.createElement('time'); tm.textContent = d.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+    const src = document.createElement('div'); src.className = 'src'; src.textContent = (it.src === 'sim' ? 'Mô phỏng' : 'Cảm biến thật') + ' · ' + ZONE_TEXT[z];
+    left.append(tm, src);
+    const hz = document.createElement('span'); hz.className = 'num'; hz.style.color = 'var(--muted)'; hz.style.fontSize = '13px'; hz.textContent = fmt(it.hz) + ' Hz';
+    const chip = document.createElement('span'); chip.className = 'chip z-' + z; chip.textContent = it.score;
+    li.append(left, hz, chip); ol.append(li);
+  }
+}
+
+/* tải CSV */
+function buildCSV(r) {
+  const lines = [
+    '# NeuroPulse - du lieu do run tay (ban demo, khong dung de chan doan)',
+    '# thoi_diem,' + r.at.toISOString(),
+    '# nguon,' + (r.source === 'sim' ? 'mo_phong' : 'cam_bien_that'),
+    '# chi_so_run_0_100,' + r.score,
+    '# tan_so_chinh_hz,' + r.peakHz.toFixed(2),
+    '# ti_le_3_6hz,' + r.ratio.toFixed(3),
+    '# cuong_do_dai_run_ms2,' + r.rmsBand.toFixed(4),
+    '# diem_tung_cua_so_2s,' + r.windows.join(' '),
+    '# tan_so_lay_mau_hz,' + CFG.fs,
+    't_s,ax,ay,az,hp_x,hp_y,hp_z'
+  ];
+  for (const row of r.rows) lines.push(row.map((v, i) => i === 0 ? v.toFixed(3) : v.toFixed(4)).join(','));
+  return lines.join('\n') + '\n';
+}
+async function download() {
+  const r = st.lastResult; if (!r) return;
+  const name = 'neuropulse_' + r.at.toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+  const text = buildCSV(r);
+  $('toast').textContent = '';
+  try {
+    if (window.claude && typeof window.claude.use === 'function') {
+      const dl = await window.claude.use('downloads');
+      if (dl) {
+        try { await dl.save({ filename: name, data: text }); $('toast').textContent = 'Đã tải ' + name; }
+        catch (e) { $('toast').textContent = e && e.code === 'declined' ? 'Đã hủy tải file.' : 'Không tải được file ở đây. Hãy mở bản web chính để tải.'; }
+        return;
+      }
+    }
+    const url = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    $('toast').textContent = 'Đã tải ' + name + ' (' + r.samples + ' dòng dữ liệu).';
+  } catch (e) { $('toast').textContent = 'Không tải được file. Hãy thử lại.'; }
+}
+
+/* ================= Vẽ: mặt đồng hồ, sóng, phổ ================= */
+const DIAL = { cx: 150, cy: 150, r: 118, a0: 135, sweep: 270 };
+function pt(deg, r = DIAL.r) { const a = deg * Math.PI / 180; return [DIAL.cx + r * Math.cos(a), DIAL.cy + r * Math.sin(a)]; }
+function arcPath(v0, v1, r = DIAL.r) {
+  const d0 = DIAL.a0 + DIAL.sweep * v0 / 100, d1 = DIAL.a0 + DIAL.sweep * v1 / 100;
+  const [x0, y0] = pt(d0, r), [x1, y1] = pt(d1, r);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${d1 - d0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+function drawDial() {
+  $('arcTrack').setAttribute('d', arcPath(0, 100));
+  $('arcOk').setAttribute('d', arcPath(0, 29.5, DIAL.r - 17));
+  $('arcWarn').setAttribute('d', arcPath(30.5, 59.5, DIAL.r - 17));
+  $('arcBad').setAttribute('d', arcPath(60.5, 100, DIAL.r - 17));
+  const g = $('ticks'); let html = '';
+  for (const v of [0, 30, 60, 100]) {
+    const [x, y] = pt(DIAL.a0 + DIAL.sweep * v / 100, DIAL.r + 20);
+    html += `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="middle" font-size="12" font-family="JetBrains Mono, monospace" fill="var(--muted)">${v}</text>`;
+  }
+  g.innerHTML = html;
+}
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function fitCanvas(c) {
+  const dpr = Math.min(3, window.devicePixelRatio || 1), w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const ctx = c.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return [ctx, w, h];
+}
+function drawWave() {
+  const c = $('wave'); if (!c.clientWidth) return;
+  const [ctx, w, h] = fitCanvas(c);
+  ctx.clearRect(0, 0, w, h);
+  const line = cssVar('--line'), accent = cssVar('--accent');
+  ctx.strokeStyle = line; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+  ctx.setLineDash([2, 4]);
+  for (let i = 1; i < 5; i++) { const x = w * i / 5; ctx.beginPath(); ctx.moveTo(x, 6); ctx.lineTo(x, h - 6); ctx.stroke(); }
+  ctx.setLineDash([]);
+  const n = Math.min(st.ringN || 0, CFG.fs * 5);
+  if (n < 2) return;
+  const ax = lastN(n), d = st.dir, s = new Float64Array(n);
+  let peak = 0;
+  for (let i = 0; i < n; i++) { s[i] = ax[0][i] * d[0] + ax[1][i] * d[1] + ax[2][i] * d[2]; peak = Math.max(peak, Math.abs(s[i])); }
+  const scale = Math.max(0.2, Math.ceil(peak * 1.15 * 10) / 10);
+  $('waveScale').textContent = '±' + fmt(scale, 1) + ' m/s²';
+  const N = CFG.fs * 5, x0 = w * (1 - n / N);
+  ctx.strokeStyle = accent; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) { const x = x0 + (i / (N - 1)) * w, y = h / 2 - (s[i] / scale) * (h / 2 - 8); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+  const ly = h / 2 - (s[n - 1] / scale) * (h / 2 - 8);
+  ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(w - 3, ly, 3.2, 0, Math.PI * 2); ctx.fill();
+}
+function drawSpec() {
+  const c = $('spec'); if (!c.clientWidth) return;
+  const [ctx, w, h] = fitCanvas(c);
+  ctx.clearRect(0, 0, w, h);
+  const fmax = 15, padB = 18, ph = h - padB - 6, X = f => (f / fmax) * (w - 12) + 6;
+  ctx.fillStyle = cssVar('--band'); ctx.fillRect(X(3), 4, X(6) - X(3), ph + 2);
+  ctx.fillStyle = cssVar('--muted'); ctx.font = '10.5px "JetBrains Mono", monospace'; ctx.textAlign = 'center';
+  for (const f of [0, 3, 6, 9, 12, 15]) ctx.fillText(f + (f === 15 ? ' Hz' : ''), Math.min(w - 18, Math.max(8, X(f))), h - 4);
+  const r = st.live; if (!r) return;
+  const P = r.spectrum; let m = 0;
+  for (let k = 1; k < P.length; k++) if (k * r.df <= fmax) m = Math.max(m, P[k]);
+  if (m <= 0) return;
+  const bw = Math.max(1.5, (X(r.df) - X(0)) - 1.2);
+  for (let k = 1; k < P.length; k++) {
+    const f = k * r.df; if (f > fmax) break;
+    const v = Math.sqrt(P[k] / m), bh = v * ph;
+    ctx.fillStyle = f >= 3 && f <= 6 ? cssVar('--accent') : cssVar('--muted');
+    ctx.globalAlpha = f >= 3 && f <= 6 ? 1 : .45;
+    ctx.fillRect(X(f) - bw / 2, 4 + ph - bh, bw, bh);
+  }
+  ctx.globalAlpha = 1;
+}
+function frame() { drawWave(); drawSpec(); requestAnimationFrame(frame); }
+
+/* ================= Khởi động ================= */
+$('startBtn').addEventListener('click', start);
+$('againBtn').addEventListener('click', () => { hide($('result')); start(); });
+$('dlBtn').addEventListener('click', download);
+$('simExit').addEventListener('click', exitSim);
+document.querySelectorAll('[data-sim]').forEach(b => b.addEventListener('click', () => {
+  st.simKind = b.dataset.sim;
+  document.querySelectorAll('[data-sim]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+}));
+resetStream(); drawDial(); setPhase('idle'); renderHistory();
+if (typeof DeviceMotionEvent === 'undefined') {
+  $('notice').innerHTML = '<div><b>Trình duyệt này không có cảm biến chuyển động.</b> Hãy mở link trên điện thoại để đo thật.</div><button class="link" type="button" id="goSim">Xem thử bằng dữ liệu mô phỏng</button>';
+  show($('notice')); $('goSim').onclick = enterSim;
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
